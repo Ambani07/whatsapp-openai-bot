@@ -10,8 +10,17 @@ BASE_URL = f"https://7107.api.green-api.com/waInstance{GREEN_ID}"
 def get_message():
     url = f"{BASE_URL}/receiveNotification/{GREEN_TOKEN}"
     res = requests.get(url)
-    message = res.json()
-    return message.text
+
+    if not res.text or res.text.strip() == "":  # nothing new
+        return None
+
+    try:
+        data = res.json()
+        return data
+    except ValueError:
+        print("⚠️ Non-JSON response from Green-API:", res.text)
+        return None
+
 
 def delete_message(receipt_id):
     url = f"{BASE_URL}/deleteNotification/{GREEN_TOKEN}/{receipt_id}"
