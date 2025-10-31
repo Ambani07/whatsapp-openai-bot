@@ -1,44 +1,50 @@
-from flask import Flask, request
-import requests, os
-
-app = Flask(__name__)
+import requests
+import time
+import os
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GREEN_ID = os.getenv("GREEN_API_ID")
 GREEN_TOKEN = os.getenv("GREEN_API_TOKEN")
+BASE_URL = f"https://7107.api.green-api.com/waInstance{GREEN_ID}"
 
-@app.route("/", methods=["GET"])
-def home():
-    return "🤖 WhatsApp + OpenAI bot is live!"
+def get_message():
+    url = f"{BASE_URL}/receiveNotification/{GREEN_TOKEN}"
+    res = requests.get(url)
+    return res.json() if res.text else None
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json
-    try:
-        msg = data["messageData"]["textMessageData"]["textMessage"]
-        chat_id = data["senderData"]["chatId"]
-    except KeyError:
-        return "no message", 200
+def delete_message(receipt_id):
+    url = f"{BASE_URL}/deleteNotification/{GREEN_TOKEN}/{receipt_id}"
+    requests.delete(url)
 
-    # --- Call OpenAI ---
+def send_message(chat_id, text):
+    url = f"{BASE_URL}/SendMessage/{GREEN_TOKEN}"
+    requests.post(url, json={"chatId": chat_id, "message": text})
+
+def ask_openai(prompt):
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
     payload = {
         "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "You are a helpful WhatsApp assistant."},
-            {"role": "user", "content": msg}
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 150
     }
     r = requests.post("https://api.openai.com/v1/chat/completions",
                       headers=headers, json=payload)
-    reply = r.json()["choices"][0]["message"]["content"]
+    return r.json()["choices"][0]["message"]["content"]
 
-    # --- Send reply via Green-API ---
-    send_url = f"https://api.green-api.com/waInstance{GREEN_ID}/SendMessage/{GREEN_TOKEN}"
-    requests.post(send_url, json={"chatId": chat_id, "message": reply})
+while True:
+    msg = get_message()
+    if msg and "body" in msg:
+        try:
+            receipt_id = msg["receiptId"]
+            text = msg["body"]["messageData"]["textMessageData"]["textMessage"]
+            chat_id = msg["body"]["senderData"]["chatId"]
 
-    return "ok", 200
+            print("Received:", text)
+            reply = ask_openai(text)
+            send_message(chat_id, reply)
+            print("Replied:", reply)
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+            delete_message(receipt_id)
+        except Exception as e:
+            print("Error:", e)
+    time.sleep(5)  # check every 5 seconds
